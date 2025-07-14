@@ -1,0 +1,46 @@
+# Python specific ignores
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python/
+env/
+venv/
+.venv/
+build/
+develop-eggs/
+dist/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+.tox/
+.coverage
+.coverage.*
+.hypothesis/
+.mypy_cache/
+.nox/
+.ruff_cache/
+.ipynb_checkpoints
+.spyproject/
+.idea/
+.vscode/
+
+# Ignore large model files
+*.pth
+*.pt
+*.onnx
+
+
+# Operating System Files
+.DS_Store
+Thumbs.db

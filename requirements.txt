@@ -1,0 +1,22 @@
+# Main requirements for pneumonia-detection project
+# Add or adjust versions as needed for your environment
+
+# Core ML and data science
+numpy
+pandas
+scikit-learn
+matplotlib
+torch
+torchvision
+pillow
+tqdm
+
+# For Grad-CAM visualizations
+pytorch-grad-cam
+
+# EfficientNet (torchvision covers this)
+
+# If using Jupyter for reports or notebooks (optional)
+jupyter
+
+# Add any other project-specific dependencies below
