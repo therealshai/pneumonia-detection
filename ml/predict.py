@@ -7,7 +7,7 @@ from PIL import Image
 import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm 
-from preprocess import ChestXRayPreprocessor 
+from .preprocess import ChestXRayPreprocessor 
 
 #%% Model loading and prediction functions
 def load_model(model_path: str, device: torch.device) -> torch.nn.Module:
