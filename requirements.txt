@@ -1,11 +1,11 @@
 # Prioritize numpy<2 for older PyTorch/Torchvision compatibility
 numpy<2
 pandas==2.2.2
-scikit-learn==1.6.1
+scikit-learn
 torch==2.6.0
 torchvision==0.21.0
 torchaudio==2.6.0
-matplotlib==3.10.0
-tqdm==4.67.1
+matplotlib
+tqdm
 Pillow
 grad-cam
