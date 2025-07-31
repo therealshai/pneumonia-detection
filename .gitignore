@@ -1,8 +1,10 @@
 # Python specific ignores
 __pycache__/
+temp_debug_images/
 *.pyc
 *.pyo
 *.pyd
+*.pth
 .Python/
 env/
 venv/

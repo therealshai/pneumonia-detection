@@ -1,0 +1,11 @@
+Indicator,Relevance,Justification
+Chest X-ray infiltrate,5,Radiographic evidence of new infiltrates is the clinical gold standard for pneumonia diagnosis.
+Procalcitonin & CRP,5,High diagnostic accuracy  when combined with symptoms; distinguish bacterial vs viral infections.
+Severity scores ,5,"Predict hospitalization need and mortality; CURB‑65 includes RR, BP, urea, age, confusion."
+"Clinical symptoms (cough, fever, dyspnea, sputum)",4,Improve diagnostic confidence when clustered; not specific alone but highly useful in triage.
+WBC count ,4,Helps differentiate bacterial pneumonia and assess immune response; part of CURB?65 and ATS criteria.
+Oxygenation ,4,Key in assessing respiratory failure risk; threshold indicates severe pneumonia.
+"Other labs (platelets, urea, albumin)",3,Used in scoring systems  help refine risk levels.
+"Radiomics features (lesion shape, heterogeneity)",3,"Emerging use in severity classification using AI, especially for SCAP."
+Pathogen-specific antigens (urine/serum),2,"Specific to certain pathogens (e.g., S. pneumoniae); limited general use but helpful in ICU."
+"Emerging biomarkers (IL-6, copeptin, lactate)",2,"Prognostic rather than diagnostic; elevated in critical cases, used for outcome prediction."

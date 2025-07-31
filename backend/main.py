@@ -8,176 +8,285 @@ import torch.nn as nn
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import JSONResponse
 from torchvision import transforms
-from torchvision.models import efficientnet_b0, EfficientNet_B0_Weights
 from starlette.middleware.cors import CORSMiddleware
 import uvicorn
+import pandas as pd
+import httpx
+from dotenv import load_dotenv
+from pydantic import BaseModel, Field
 
-# --- Import modules as part of the 'ml' package ---
-from ml.efficientnet_model import get_model # We will use this get_model directly
-from ml.preprocess import ChestXRayPreprocessor 
-from ml.grad_cam_utils import GradCAM, show_cam_on_image, get_efficientnet_target_layer, ClassifierOutputTarget
+
+load_dotenv()
+
+from .ml.efficientnet_model import get_model 
+from .ml.preprocess import ChestXRayPreprocessor
+
+from .ml.llm_utils import get_llm_diagnosis_summary, describe_heatmap
+
+# Import Grad-CAM specific libraries from the installed 'grad-cam' package
+import cv2 # Still needed for show_cam_on_image and general image processing
+from pytorch_grad_cam import GradCAM
+from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
+from pytorch_grad_cam.utils.image import show_cam_on_image
+
 
 # --- Configuration ---
-MODEL_WEIGHTS_PATH = os.path.join(os.path.dirname(__file__), '..', 'ml', 'best_model_V0.pth')
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f"Loading model on device: {DEVICE}")
+# Define paths for both models and the SimCLR backbone
+MODEL_V1_BALANCED_PATH = os.path.join(os.path.dirname(__file__), 'ml', 'best_model_V1.pth')
+MODEL_HIGH_RECALL_PATH = os.path.join(os.path.dirname(__file__), 'ml', 'best_model.pth') # This was your best recall model
+SIMCLR_BACKBONE_PATH = os.path.join(os.path.dirname(__file__), 'outputs', 'simclr_backbone_best.pth') # Assuming SimCLR is in outputs
 
+DOWNLOAD_PATH_V1 = os.path.join(os.path.dirname(__file__), 'ml', 'downloaded_model_V1.pth')
+DOWNLOAD_PATH_HIGH_RECALL = os.path.join(os.path.dirname(__file__), 'ml', 'downloaded_model_high_recall.pth')
+
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Loading models on device: {DEVICE}")
+KNOWLEDGE_BASE_PATH = os.path.join(os.path.dirname(__file__), '..', 'Pneumonia_Indicators_Relevance.csv')
 # --- Global instances (will be initialized in startup_event) ---
-# We will load the model directly from get_model, not wrap it in PneumoniaDetectionModel
-model_backbone = None # This will hold the efficientnet_b0 model
+model_v1_balanced = None
+model_high_recall = None
 image_preprocessor = None
-grad_cam_instance = None
+grad_cam_instance = None # Grad-CAM will be for the balanced model
+pneumonia_indicators_df = None
 
 # --- FastAPI App ---
 app = FastAPI(
     title="Pneumonia Detection API",
-    description="API for detecting pneumonia from chest X-ray images using EfficientNet-B0 with Grad-CAM visualization.",
+    description="API for detecting pneumonia from chest X-ray images using a multi-model pipeline (Balanced & High Recall) with Grad-CAM visualization and LLM diagnosis summary.",
     version="1.0.0",
 )
 
 # Configure CORS Middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:8080"],  # Replace with your frontend's actual origin
+    allow_origins=["http://localhost:8080", "http://localhost:3000", "http://localhost:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# Pydantic Model for the /summarize_diagnosis request body
+class PneumoniaDiagnosisRequest(BaseModel):
+    model_v1_prediction: str = Field(..., description="Prediction from Model V1 (Balanced).")
+    model_v1_probability: float = Field(..., ge=0.0, le=1.0, description="Probability from Model V1 (Balanced).")
+    model_high_recall_prediction: str = Field(..., description="Prediction from High Recall Model.")
+    model_high_recall_probability: float = Field(..., ge=0.0, le=1.0, description="Probability from High Recall Model.")
+    findings: str | None = Field(None, description="Optional additional clinical findings provided by the user.")
+    grad_cam_description: str | None = Field(None, description="Textual description of the Grad-CAM heatmap.") # NEW: Add Grad-CAM description
+
+# Helper function to get the last convolutional layer for Grad-CAM
+def get_efficientnet_last_conv_layer(model):
+    """
+    Dynamically finds the last convolutional layer in an EfficientNet model.
+    For EfficientNet-B0, this is typically within `model.features[-1]`.
+    """
+    last_conv_layer = None
+    if hasattr(model, 'features') and len(model.features) > 0:
+        # Iterate through the modules of the last feature block in reverse
+        for module in reversed(list(model.features[-1].modules())): # Use .modules() to go deeper
+            if isinstance(module, torch.nn.Conv2d):
+                last_conv_layer = module
+                break # Found the last one, break
+    
+    if last_conv_layer:
+        print(f"Identified target layer for Grad-CAM: {type(last_conv_layer).__name__} at {last_conv_layer}")
+        return last_conv_layer
+    else:
+        # Fallback: iterate through all named modules if the above structure is not found
+        for name, module in model.named_modules():
+            if isinstance(module, torch.nn.Conv2d):
+                last_conv_layer = module # Keep updating to get the very last one
+        if last_conv_layer:
+            print(f"Fallback: Identified last Conv2d layer for Grad-CAM: {last_conv_layer}")
+            return last_conv_layer
+
+    raise ValueError("Could not find a suitable convolutional layer for Grad-CAM in the model.")
+
 @app.on_event("startup")
 async def startup_event():
-    """
-    Loads the model, preprocessor, and Grad-CAM when the FastAPI app starts.
-    """
-    global model_backbone, image_preprocessor, grad_cam_instance
-
-    print(f"Loading model on device: {DEVICE}")
+    print("Downloading models from Azure Blob Storage...")
     try:
-        # 1. Load the model architecture using get_model from efficientnet_model.py
-        # This returns the efficientnet_b0 model with the modified classifier.
-        model_backbone = get_model(num_classes=1) 
-        
-        # 2. Load the trained weights into the model_backbone directly
-        print(f"Attempting to load model weights from: {os.path.abspath(MODEL_WEIGHTS_PATH)}")
-        if not os.path.exists(MODEL_WEIGHTS_PATH):
-            raise FileNotFoundError(f"Model weights not found at: {MODEL_WEIGHTS_PATH}")
-        
-        # Load state dict directly into the efficientnet_b0 model
-        model_backbone.load_state_dict(torch.load(MODEL_WEIGHTS_PATH, map_location=DEVICE))
-        model_backbone.to(DEVICE)
-        model_backbone.eval() # Set model to evaluation mode
-        print(f"Model '{MODEL_WEIGHTS_PATH}' loaded successfully.")
+        # Download Model V1
+        async with httpx.AsyncClient() as client:
+            response = await client.get(os.environ.get('MODEL_V1_URL'))
+            response.raise_for_status()
+            with open(DOWNLOAD_PATH_V1, 'wb') as f:
+                f.write(response.content)
+        print("Model V1 downloaded successfully.")
 
-        # 3. Initialize the preprocessor
-        image_preprocessor = ChestXRayPreprocessor()
-        print("Image preprocessor initialized.")
+        # Download High-Recall Model
+        async with httpx.AsyncClient() as client:
+            response = await client.get(os.environ.get('MODEL_HIGH_RECALL_URL'))
+            response.raise_for_status()
+            with open(DOWNLOAD_PATH_HIGH_RECALL, 'wb') as f:
+                f.write(response.content)
+        print("High-Recall Model downloaded successfully.")
 
-        # 4. Initialize Grad-CAM
-        # Pass the model_backbone (the efficientnet_b0 instance) to get_efficientnet_target_layer
-        target_layer_for_cam = get_efficientnet_target_layer(model_backbone) 
-        
-        if not target_layer_for_cam:
-            raise RuntimeError("Could not find a suitable target layer for Grad-CAM.")
-        
-        # GradCAM expects target_layers as a list
-        if not isinstance(target_layer_for_cam, list):
-            target_layer_for_cam = [target_layer_for_cam]
+        # Load the pre-trained models
+        global model_v1, model_high_recall
+        model_v1 = get_model()
+        model_v1.load_state_dict(torch.load(DOWNLOAD_PATH_V1, map_location=DEVICE))
+        model_v1.to(DEVICE).eval()
+        print("Model V1 loaded.")
 
-        # Pass the model_backbone (the efficientnet_b0 instance) to GradCAM
-        grad_cam_instance = GradCAM(model=model_backbone, target_layers=target_layer_for_cam, use_cuda=DEVICE.type == 'cuda')
-        print("Grad-CAM instance initialized.")
+        model_high_recall = get_model()
+        model_high_recall.load_state_dict(torch.load(DOWNLOAD_PATH_HIGH_RECALL, map_location=DEVICE))
+        model_high_recall.to(DEVICE).eval()
+        print("High-Recall Model loaded.")
 
     except Exception as e:
-        print(f"Error during application startup: {e}")
-        raise # Re-raise the exception to prevent the FastAPI app from starting if loading fails
+        print(f"Error during model download or loading: {e}")
+        raise
+
 
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
     """
-    Analyzes a chest X-ray image for pneumonia and returns a prediction and confidence.
+    Analyzes a chest X-ray image for pneumonia using a multi-model pipeline
+    and returns predictions and probabilities from both models.
     """
-    if model_backbone is None or image_preprocessor is None:
-        raise HTTPException(status_code=503, detail="Model or preprocessor not loaded. Server is not ready.")
+    if model_v1_balanced is None or model_high_recall is None or image_preprocessor is None:
+        raise HTTPException(status_code=503, detail="Models or preprocessor not loaded. Server is not ready.")
 
     try:
         image_bytes = await file.read()
         image = Image.open(io.BytesIO(image_bytes))
 
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+
         input_tensor = image_preprocessor.get_transforms()['val'](image).unsqueeze(0).to(DEVICE)
 
         with torch.no_grad():
-            # Get logits from the model, then apply sigmoid to get probability
-            logits = model_backbone(input_tensor)
-            prediction_prob = torch.sigmoid(logits).item()
-            
-        label = "Pneumonia" if prediction_prob >= 0.5 else "Normal"
-        confidence = f"{prediction_prob * 100:.2f}"
+            # Predict with Model V1 (Balanced)
+            logits_v1 = model_v1_balanced(input_tensor)
+            prob_v1 = torch.sigmoid(logits_v1).item()
+            pred_v1 = "Pneumonia" if prob_v1 >= 0.5 else "Normal"
+
+            # Predict with High Recall Model
+            logits_high_recall = model_high_recall(input_tensor)
+            prob_high_recall = torch.sigmoid(logits_high_recall).item()
+            pred_high_recall = "Pneumonia" if prob_high_recall >= 0.5 else "Normal"
 
         return JSONResponse(content={
             "filename": file.filename,
-            "prediction": label,
-            "confidence": confidence
+            "model_v1_prediction": pred_v1,
+            "model_v1_probability": f"{prob_v1:.4f}",
+            "model_high_recall_prediction": pred_high_recall,
+            "model_high_recall_probability": f"{prob_high_recall:.4f}"
         })
     except Exception as e:
         print(f"Error in /predict endpoint: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/predict_with_cam")
-async def predict_with_cam(file: UploadFile = File(...), target_class: int = None):
+async def predict_with_cam(file: UploadFile = File(...)):
     """
-    Analyzes a chest X-ray image for pneumonia, returns a prediction, confidence,
-    and a base64 encoded Grad-CAM heatmap image.
+    Analyzes a chest X-ray image for pneumonia, returns predictions from both models,
+    a base64 encoded Grad-CAM heatmap image (from Model V1), and a textual description
+    of the heatmap for LLM consumption.
     """
-    if model_backbone is None or image_preprocessor is None or grad_cam_instance is None:
-        raise HTTPException(status_code=503, detail="Model, preprocessor, or Grad-CAM not loaded. Server is not ready.")
+    if model_v1_balanced is None or model_high_recall is None or image_preprocessor is None or grad_cam_instance is None:
+        raise HTTPException(status_code=503, detail="Models, preprocessor, or Grad-CAM not loaded. Server is not ready.")
 
     try:
         image_bytes = await file.read()
-        image_pil_original = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+        image_pil_original = Image.open(io.BytesIO(image_bytes))
 
+        if image_pil_original.mode != 'RGB':
+            image_pil_original = image_pil_original.convert('RGB')
+
+        # Preprocess the image for the model's input
         input_tensor = image_preprocessor.get_transforms()['val'](image_pil_original).unsqueeze(0).to(DEVICE)
 
         with torch.no_grad():
-            # Get logits from the model, then apply sigmoid for probability
-            logits = model_backbone(input_tensor)
-            prediction_prob = torch.sigmoid(logits).item()
-            
-        label = "Pneumonia" if prediction_prob >= 0.5 else "Normal"
-        confidence = f"{prediction_prob * 100:.2f}"
+            # Predict with Model V1 (Balanced)
+            logits_v1 = model_v1_balanced(input_tensor)
+            prob_v1 = torch.sigmoid(logits_v1).item()
+            pred_v1 = "Pneumonia" if prob_v1 >= 0.5 else "Normal"
 
-        # Determine the target for Grad-CAM
-        # For a single-output model, the target category is always 0 (the index of the output neuron).
-        # The ClassifierOutputTarget helps GradCAM understand which output to backpropagate from.
-        targets = [ClassifierOutputTarget(0)] 
+            # Predict with High Recall Model
+            logits_high_recall = model_high_recall(input_tensor)
+            prob_high_recall = torch.sigmoid(logits_high_recall).item()
+            pred_high_recall = "Pneumonia" if prob_high_recall >= 0.5 else "Normal"
 
-        # Generate Grad-CAM heatmap
-        # grayscale_cam will be (1, H, W) from our custom GradCAM
-        grayscale_cam = grad_cam_instance(input_tensor=input_tensor, targets=targets)
+        # Generate Grad-CAM for Model V1 (Balanced)
+        # The input_tensor needs to have requires_grad=True for Grad-CAM
+        # We create a new tensor for this to avoid modifying the original
+        cam_input_tensor = image_preprocessor.get_transforms()['val'](image_pil_original).unsqueeze(0).to(DEVICE).requires_grad_(True)
         
-        # Ensure grayscale_cam is 2D (H, W) for show_cam_on_image.
-        grayscale_cam = grayscale_cam[0, :] # Take the first (and only) image in the batch
+        targets = [ClassifierOutputTarget(0)] # For a single output neuron binary classifier
+        grayscale_cam = grad_cam_instance(input_tensor=cam_input_tensor, targets=targets)
+        
+        if grayscale_cam is None or grayscale_cam.size == 0:
+            print("Warning: Grad-CAM returned empty or None heatmap. Cannot generate description.")
+            grad_cam_description_text = "Grad-CAM heatmap could not be generated."
+            img_str = None # No CAM image to return
+        else:
+            grayscale_cam = grayscale_cam[0, :] # Take the first (and only) image in the batch
 
-        # Convert original PIL image to numpy array for show_cam_on_image
-        original_image_np = np.array(image_pil_original)
-        cam_image = show_cam_on_image(original_image_np, grayscale_cam, use_rgb=True)
+            # Generate textual description of the heatmap
+            grad_cam_description_text = describe_heatmap(grayscale_cam)
 
-        # Convert the CAM image (NumPy array) to PIL Image and then to base64
-        cam_image_pil = Image.fromarray(cam_image)
-        buffered = io.BytesIO()
-        cam_image_pil.save(buffered, format="PNG")
-        img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+            # Resize original PIL image to 224x224 for CAM overlay
+            image_pil_resized_for_cam = image_pil_original.resize((224, 224), Image.LANCZOS)
+            original_image_np = np.array(image_pil_resized_for_cam).astype(np.float32) / 255.0
+
+            cam_image = show_cam_on_image(original_image_np, grayscale_cam, use_rgb=True)
+
+            if cam_image is None or cam_image.size == 0:
+                print("Warning: show_cam_on_image returned empty or None image. Cannot return CAM image.")
+                img_str = None
+            else:
+                cam_image_pil = Image.fromarray(cam_image) # show_cam_on_image already returns uint8 [0,255]
+                buffered = io.BytesIO()
+                cam_image_pil.save(buffered, format="PNG")
+                img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
         return JSONResponse(content={
             "filename": file.filename,
-            "prediction": label,
-            "confidence": confidence,
-            "grad_cam_image_base64": img_str,
-            "grad_cam_image_format": "image/png"
+            "model_v1_prediction": pred_v1,
+            "model_v1_probability": f"{prob_v1:.4f}",
+            "model_high_recall_prediction": pred_high_recall,
+            "model_high_recall_probability": f"{prob_high_recall:.4f}",
+            "grad_cam_image_base64": img_str, # Will be None if CAM failed
+            "grad_cam_image_format": "image/png" if img_str else None,
+            "grad_cam_description": grad_cam_description_text # NEW: Textual CAM description
         })
     except Exception as e:
         print(f"Error in predict_with_cam: {e}")
         raise HTTPException(status_code=500, detail=f"Prediction or Grad-CAM failed: {str(e)}")
 
-# This block is for running the app directly with `python main.py`
-# if __name__ == "__main__":
-#     uvicorn.run(app, host="127.0.0.1", port=8000)
+@app.post("/summarize_diagnosis")
+async def summarize_diagnosis(
+    request: PneumoniaDiagnosisRequest
+):
+    """
+    Uses an LLM to generate a concise, professional summary of the diagnosis for a medical doctor,
+    based on multi-model predictions and optionally augmented with knowledge from pneumonia indicators.
+    """
+    try:
+        summary = await get_llm_diagnosis_summary(
+            model_v1_prediction=request.model_v1_prediction,
+            model_v1_probability=request.model_v1_probability,
+            model_high_recall_prediction=request.model_high_recall_prediction,
+            model_high_recall_probability=request.model_high_recall_probability,
+            findings=request.findings,
+            pneumonia_indicators_df=pneumonia_indicators_df, # Pass the loaded knowledge base
+            grad_cam_description=request.grad_cam_description # NEW: Pass Grad-CAM description to LLM
+        )
+        return JSONResponse(content={
+            "diagnosis_summary": summary,
+            "model_v1_prediction": request.model_v1_prediction,
+            "model_v1_probability": f"{request.model_v1_probability:.2f}",
+            "model_high_recall_prediction": request.model_high_recall_prediction,
+            "model_high_recall_probability": f"{request.model_high_recall_probability:.2f}"
+        })
+    except Exception as e:
+        print(f"Error in /summarize_diagnosis endpoint: {e}")
+        if isinstance(e, httpx.HTTPStatusError) and e.response:
+            print(f"Perplexity API Response Body (Error): {e.response.text}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate diagnosis summary: {str(e)}")
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)
