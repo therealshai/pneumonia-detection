@@ -57,13 +57,22 @@ app = FastAPI(
 )
 
 # Configure CORS Middleware
+# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:8080", "http://localhost:3000", "http://localhost:5173"],
+    allow_origins=["https://jolly-coast-028cff500.1.azurestaticapps.net"],  # azure frontend URL
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+@app.get("/")
+async def root():
+    return {"message": "Pneumonia Detection API is running!"}
+
+@app.get("/health")
+async def health():
+    return {"status": "healthy"}
+
 
 # Pydantic Model for the /summarize_diagnosis request body
 class PneumoniaDiagnosisRequest(BaseModel):
