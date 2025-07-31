@@ -18,10 +18,9 @@ from pydantic import BaseModel, Field
 
 load_dotenv()
 
-from .ml.efficientnet_model import get_model 
-from .ml.preprocess import ChestXRayPreprocessor
-
-from .ml.llm_utils import get_llm_diagnosis_summary, describe_heatmap
+from ml.efficientnet_model import get_model 
+from ml.preprocess import ChestXRayPreprocessor
+from ml.llm_utils import get_llm_diagnosis_summary, describe_heatmap
 
 # Import Grad-CAM specific libraries from the installed 'grad-cam' package
 import cv2 # Still needed for show_cam_on_image and general image processing
@@ -113,7 +112,7 @@ def get_efficientnet_last_conv_layer(model):
 
 @app.on_event("startup")
 async def startup_event():
-    print("Loading models on device:", device)
+    
     
     # Check if MODEL_V1_URL exists
     model_url = os.environ.get('MODEL_V1_URL')
