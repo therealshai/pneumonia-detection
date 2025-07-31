@@ -7,6 +7,8 @@ temp_debug_images/
 *.pth
 .Python/
 env/
+.env
+
 venv/
 .venv/
 build/
@@ -36,13 +38,47 @@ share/python-wheels/
 .spyproject/
 .idea/
 .vscode/
+.tmp.driveupload/
 
 # Ignore large model files
+fastapi_env/
 *.pth
 *.pt
 *.onnx
 
+# Data files
+*.csv
+*.json
+actual_meta_data.csv
+Pneumonia_Indicators_Relevance.csv
+class_weights.json
 
 # Operating System Files
 .DS_Store
 Thumbs.db
+
+# Frontend specific ignores
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/*.local
+frontend/logs/
+frontend/*.log
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/pnpm-debug.log*
+frontend/lerna-debug.log*
+
+# OR if you want to ignore node_modules anywhere in the project:
+**/node_modules/
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
