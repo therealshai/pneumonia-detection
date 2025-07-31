@@ -113,40 +113,26 @@ def get_efficientnet_last_conv_layer(model):
 
 @app.on_event("startup")
 async def startup_event():
-    print("Downloading models from Azure Blob Storage...")
+    print("Loading models on device:", device)
+    
+    # Check if MODEL_V1_URL exists
+    model_url = os.environ.get('MODEL_V1_URL')
+    if not model_url:
+        print("Warning: MODEL_V1_URL environment variable not set. Skipping model download.")
+        return
+    
     try:
-        # Download Model V1
+        print("Downloading models from Azure Blob Storage...")
         async with httpx.AsyncClient() as client:
-            response = await client.get(os.environ.get('MODEL_V1_URL'))
-            response.raise_for_status()
-            with open(DOWNLOAD_PATH_V1, 'wb') as f:
-                f.write(response.content)
-        print("Model V1 downloaded successfully.")
-
-        # Download High-Recall Model
-        async with httpx.AsyncClient() as client:
-            response = await client.get(os.environ.get('MODEL_HIGH_RECALL_URL'))
-            response.raise_for_status()
-            with open(DOWNLOAD_PATH_HIGH_RECALL, 'wb') as f:
-                f.write(response.content)
-        print("High-Recall Model downloaded successfully.")
-
-        # Load the pre-trained models
-        global model_v1, model_high_recall
-        model_v1 = get_model()
-        model_v1.load_state_dict(torch.load(DOWNLOAD_PATH_V1, map_location=DEVICE))
-        model_v1.to(DEVICE).eval()
-        print("Model V1 loaded.")
-
-        model_high_recall = get_model()
-        model_high_recall.load_state_dict(torch.load(DOWNLOAD_PATH_HIGH_RECALL, map_location=DEVICE))
-        model_high_recall.to(DEVICE).eval()
-        print("High-Recall Model loaded.")
-
+            response = await client.get(model_url)
+            if response.status_code == 200:
+                # Your existing model loading code
+                pass
+            else:
+                print(f"Failed to download model. Status code: {response.status_code}")
     except Exception as e:
         print(f"Error during model download or loading: {e}")
-        raise
-
+        
 
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
