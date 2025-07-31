@@ -1,4 +1,5 @@
-name: Azure Static Web Apps CI/CD
+name: Azure Static Web Apps CI/CD -frontend and Backend
+description: Build and deploy a static web app with a backend API using Azure Static Web Apps.
 
 on:
   push:

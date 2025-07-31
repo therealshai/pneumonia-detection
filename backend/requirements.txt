@@ -5,8 +5,9 @@ python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 python-dotenv==1.0.0
 pydantic==2.5.0
-torch>=2.0.0,<2.2.0
-torchvision>=0.15.0,<0.17.0
+torch==2.1.2
+torchvision==0.16.2
+# Remove torchaudio since it's not used
 grad-cam>=1.4.8
 pillow==10.0.1
 numpy==1.24.3
