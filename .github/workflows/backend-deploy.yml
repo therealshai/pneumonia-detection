@@ -34,7 +34,7 @@ jobs:
       run: |
         source venv/bin/activate
         pip install --upgrade pip
-        pip install -r backend/requirements.txt
+        pip install -r requirements.txt
 
     - name: Zip artifact for deployment
       # This zips the entire backend folder, excluding specified files/directories
