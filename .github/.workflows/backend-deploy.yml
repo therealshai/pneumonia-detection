@@ -62,6 +62,11 @@ jobs:
       uses: actions/download-artifact@v3
       with:
         name: python-app
+    
+    - name: Login to Azure
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
 
     - name: Unzip artifact for deployment
       run: unzip backend-release.zip
@@ -70,9 +75,7 @@ jobs:
       uses: azure/webapps-deploy@v2
       id: deploy-to-webapp
       with:
-        app-name: 'pneumonia-detection-api-shaista'  # Replace with your actual App Service name
+        app-name: 'pneumonia-detection-api-shaista'
         slot-name: 'Production'
-        publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE }}
         package: .
-        
         startup-command: 'uvicorn main:app --host 0.0.0.0 --port 8000'
