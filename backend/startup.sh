@@ -18,4 +18,5 @@ pip install --no-cache-dir -r requirements.txt
 
 echo "Starting the Uvicorn server..."
 # Run the application using the uvicorn from the activated virtual environment
-python -m uvicorn main:app --host 0.0.0.0 --port 8000
+# Use the absolute path to uvicorn to ensure it's always found
+./antenv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
