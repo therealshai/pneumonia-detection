@@ -1,75 +1,43 @@
-name: Deploy Pneumonia Detection API
+# This workflow deploys a Python FastAPI application to Azure App Service.
+# It is triggered on every push to the 'main' branch.
 
+name: Deploy to Azure App Service
+
+# Controls when the workflow will run.
 on:
   push:
     branches:
       - main
-    paths:
-      - 'backend/**'
-  workflow_dispatch:
 
+# A workflow run is made up of one or more jobs.
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
 
+    # This job contains a sequence of steps.
     steps:
-      - uses: actions/checkout@v4
+      # Step 1: Checks out your repository under $GITHUB_WORKSPACE, so your job can access it.
+      - name: 'Checkout GitHub Action'
+        uses: actions/checkout@v4
 
-      - name: Set up Python version
-        uses: actions/setup-python@v4
+      # Step 2: Logs in to Azure using the secret stored in your GitHub repository.
+      # You MUST create a service principal and add its credentials as a GitHub secret.
+      # See the instructions at the end of this document.
+      - name: 'Login to Azure'
+        uses: azure/login@v1
         with:
-          python-version: '3.10'
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Create deployment package
-        run: |
-          echo "Creating deployment package from backend directory..."
-          # Create a fresh deployment directory
-          mkdir -p deployment_package
-          
-          # Copy everything from backend into the new directory
-          cp -r backend/* deployment_package/
-
-          # Verify contents of the package
-          echo "Contents of the deployment package:"
-          ls -la deployment_package/
-          
-          # Zip the deployment package
-          cd deployment_package
-          zip -r ../pneumonia-app.zip .
-          cd ..
-          echo "pneumonia-app.zip created."
-
-      - name: Upload artifact for deployment jobs
-        uses: actions/upload-artifact@v4
-        with:
-          name: python-app
-          path: pneumonia-app.zip
-
-  deploy:
-    runs-on: ubuntu-latest
-    needs: build
-    environment:
-      name: 'Production'
-      url: ${{ steps.deploy-to-webapp.outputs.webapp-url }}
-
-    steps:
-      - name: Download artifact from build job
-        uses: actions/download-artifact@v4
-        with:
-          name: python-app
-
-      - name: Extract deployment package
-        run: |
-          echo "Extracting ZIP file to 'extracted/' directory..."
-          unzip pneumonia-app.zip -d extracted/
-          echo "Extracted files:"
-          ls -la extracted/
-
+      # Step 3: Deploys the application to the Azure App Service.
+      # This action automatically zips the contents of your repository and deploys it.
       - name: 'Deploy to Azure Web App'
-        uses: azure/webapps-deploy@v3
         id: deploy-to-webapp
+        uses: azure/webapps-deploy@v2
         with:
-          app-name: 'pneumonia-detection-api-shaista'
-          slot-name: 'Production'
-          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE }}
-          package: 'extracted' # The 'package' parameter MUST point to the directory containing the unzipped files.
+          # The name of your Azure App Service.
+          app-name: 'pneumonia-detection-api-shaista-cvddeghsf7bngdfc'
+          # The package to be deployed (the entire repository).
+          package: '.'
+          # The startup command to run on the Azure App Service.
+          # This will execute the robust startup.sh script you've created.
+          startupCommand: './startup.sh'
