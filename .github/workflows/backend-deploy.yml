@@ -20,41 +20,30 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Create and start virtual environment
+      - name: Create deployment package
         run: |
-          cd backend
-          python -m venv venv
-          source venv/bin/activate
+          echo "Creating deployment package from backend directory..."
+          # Create a fresh deployment directory
+          mkdir -p deployment_package
           
-      - name: Install dependencies
-        run: |
-          cd backend
-          source venv/bin/activate
-          pip install --upgrade pip
-          pip install -r requirements.txt
+          # Copy everything from backend into the new directory
+          cp -r backend/* deployment_package/
+
+          # Verify contents of the package
+          echo "Contents of the deployment package:"
+          ls -la deployment_package/
           
-      - name: Debug - List files before zipping
-        run: |
-          cd backend
-          echo "=== Files in backend directory ==="
-          ls -la
-          echo "=== Content of requirements.txt ==="
-          head -10 requirements.txt
-          echo "=== Content of main.py (first 20 lines) ==="
-          head -20 main.py
-          
-      - name: Zip artifact for deployment
-        run: |
-          cd backend
-          zip -r ../backend.zip . -x venv/\* __pycache__/\* .pytest_cache/\* .git/\* .gitignore
-          echo "=== Zip file created, checking contents ==="
-          unzip -l ../backend.zip | head -30
+          # Zip the deployment package
+          cd deployment_package
+          zip -r ../pneumonia-app.zip .
+          cd ..
+          echo "pneumonia-app.zip created."
 
       - name: Upload artifact for deployment jobs
         uses: actions/upload-artifact@v4
         with:
           name: python-app
-          path: backend.zip
+          path: pneumonia-app.zip
 
   deploy:
     runs-on: ubuntu-latest
@@ -69,24 +58,18 @@ jobs:
         with:
           name: python-app
 
-      - name: Unzip artifact for deployment
+      - name: Extract deployment package
         run: |
-          unzip backend.zip
-          echo "=== Files after unzipping ==="
-          ls -la
-          echo "=== Checking if requirements.txt exists ==="
-          if [ -f requirements.txt ]; then
-            echo "✅ requirements.txt found"
-            head -5 requirements.txt
-          else
-            echo "❌ requirements.txt NOT found"
-          fi
+          echo "Extracting ZIP file to 'extracted/' directory..."
+          unzip pneumonia-app.zip -d extracted/
+          echo "Extracted files:"
+          ls -la extracted/
 
       - name: 'Deploy to Azure Web App'
-        uses: azure/webapps-deploy@v2
+        uses: azure/webapps-deploy@v3
         id: deploy-to-webapp
         with:
           app-name: 'pneumonia-detection-api-shaista'
           slot-name: 'Production'
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE }}
-          package: .
+          package: 'extracted' # The 'package' parameter MUST point to the directory containing the unzipped files.
