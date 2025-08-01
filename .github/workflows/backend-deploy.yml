@@ -35,7 +35,7 @@ jobs:
         uses: azure/webapps-deploy@v2
         with:
           # The name of your Azure App Service.
-          app-name: 'pneumonia-detection-api-shaista-cvddeghsf7bngdfc'
+          app-name: 'pneumonia-detection-api-shaista'
           # The package to be deployed (the entire repository).
           package: '.'
           # The startup command to run on the Azure App Service.
