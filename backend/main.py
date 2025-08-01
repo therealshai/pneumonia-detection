@@ -110,28 +110,95 @@ def get_efficientnet_last_conv_layer(model):
 
     raise ValueError("Could not find a suitable convolutional layer for Grad-CAM in the model.")
 
+# start event to load models and preprocessor
 @app.on_event("startup")
 async def startup_event():
-    
-    
-    # Check if MODEL_V1_URL exists
-    model_url = os.environ.get('MODEL_V1_URL')
-    if not model_url:
-        print("Warning: MODEL_V1_URL environment variable not set. Skipping model download.")
-        return
+    global model_v1_balanced, model_high_recall, image_preprocessor, grad_cam_instance, pneumonia_indicators_df
     
     try:
-        print("Downloading models from Azure Blob Storage...")
-        async with httpx.AsyncClient() as client:
-            response = await client.get(model_url)
-            if response.status_code == 200:
-                # Your existing model loading code
-                pass
-            else:
-                print(f"Failed to download model. Status code: {response.status_code}")
-    except Exception as e:
-        print(f"Error during model download or loading: {e}")
+        print("Starting model initialization...")
         
+        # Initialize preprocessor first
+        image_preprocessor = ChestXRayPreprocessor()
+        print("Image preprocessor initialized.")
+        
+        # Load knowledge base if it exists
+        if os.path.exists(KNOWLEDGE_BASE_PATH):
+            pneumonia_indicators_df = pd.read_csv(KNOWLEDGE_BASE_PATH)
+            print("Knowledge base loaded.")
+        else:
+            print("Warning: Knowledge base file not found. Continuing without it.")
+            pneumonia_indicators_df = None
+        
+        # Check if models exist locally first
+        if os.path.exists(MODEL_V1_BALANCED_PATH) and os.path.exists(MODEL_HIGH_RECALL_PATH):
+            print("Loading models from local files...")
+            
+            # Load Model V1 (Balanced)
+            model_v1_balanced = get_model()
+            model_v1_balanced.load_state_dict(torch.load(MODEL_V1_BALANCED_PATH, map_location=DEVICE))
+            model_v1_balanced.to(DEVICE)
+            model_v1_balanced.eval()
+            print("Model V1 (Balanced) loaded successfully.")
+            
+            # Load High Recall Model
+            model_high_recall = get_model()
+            model_high_recall.load_state_dict(torch.load(MODEL_HIGH_RECALL_PATH, map_location=DEVICE))
+            model_high_recall.to(DEVICE)
+            model_high_recall.eval()
+            print("High Recall Model loaded successfully.")
+            
+        else:
+            # Try to download models
+            model_v1_url = os.environ.get('MODEL_V1_URL')
+            model_high_recall_url = os.environ.get('MODEL_HIGH_RECALL_URL')
+            
+            if model_v1_url and model_high_recall_url:
+                print("Downloading models from Azure Blob Storage...")
+                
+                async with httpx.AsyncClient(timeout=300.0) as client:  # 5 minute timeout
+                    # Download Model V1
+                    response_v1 = await client.get(model_v1_url)
+                    if response_v1.status_code == 200:
+                        with open(DOWNLOAD_PATH_V1, 'wb') as f:
+                            f.write(response_v1.content)
+                        
+                        model_v1_balanced = get_model()
+                        model_v1_balanced.load_state_dict(torch.load(DOWNLOAD_PATH_V1, map_location=DEVICE))
+                        model_v1_balanced.to(DEVICE)
+                        model_v1_balanced.eval()
+                        print("Model V1 downloaded and loaded successfully.")
+                    else:
+                        raise Exception(f"Failed to download Model V1. Status: {response_v1.status_code}")
+                    
+                    # Download High Recall Model
+                    response_hr = await client.get(model_high_recall_url)
+                    if response_hr.status_code == 200:
+                        with open(DOWNLOAD_PATH_HIGH_RECALL, 'wb') as f:
+                            f.write(response_hr.content)
+                        
+                        model_high_recall = get_model()
+                        model_high_recall.load_state_dict(torch.load(DOWNLOAD_PATH_HIGH_RECALL, map_location=DEVICE))
+                        model_high_recall.to(DEVICE)
+                        model_high_recall.eval()
+                        print("High Recall Model downloaded and loaded successfully.")
+                    else:
+                        raise Exception(f"Failed to download High Recall Model. Status: {response_hr.status_code}")
+            else:
+                raise Exception("Model files not found locally and MODEL_V1_URL/MODEL_HIGH_RECALL_URL not set")
+        
+        # Initialize Grad-CAM for Model V1
+        if model_v1_balanced is not None:
+            target_layer = get_efficientnet_last_conv_layer(model_v1_balanced)
+            grad_cam_instance = GradCAM(model=model_v1_balanced, target_layers=[target_layer])
+            print("Grad-CAM initialized successfully.")
+        
+        print("All models and components initialized successfully!")
+        
+    except Exception as e:
+        print(f"Error during startup: {e}")
+        # Don't raise the exception - let the app start but mark models as unavailable
+        print("App will start but models may not be available.")
 
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
