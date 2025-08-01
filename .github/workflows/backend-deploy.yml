@@ -39,5 +39,5 @@ jobs:
           # The package to be deployed (the entire repository).
           package: '.'
           # The startup command to run on the Azure App Service.
-          # This will execute the robust startup.sh script you've created.
-          startupCommand: './startup.sh'
+          # This has been corrected to use 'startup-command'
+          startup-command: './startup.sh'
