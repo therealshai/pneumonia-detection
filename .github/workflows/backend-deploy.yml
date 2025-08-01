@@ -43,7 +43,7 @@ jobs:
       - name: Zip artifact for deployment
         run: |
           cd backend
-          zip -r ../backend.zip . -x venv/\* __pycache__/\* .pytest_cache/\*
+          zip -r ../backend.zip . -x venv/\* __pycache__/\* .pytest_cache/\* .git/\*
 
       - name: Upload artifact for deployment jobs
         uses: actions/upload-artifact@v4
@@ -68,10 +68,11 @@ jobs:
         run: unzip backend.zip
 
       - name: 'Deploy to Azure Web App'
-        uses: azure/webapps-deploy@v2
+        uses: azure/webapps-deploy@v3  # Updated to v3
         id: deploy-to-webapp
         with:
           app-name: 'pneumonia-detection-api-shaista'
           slot-name: 'Production'
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE }}
           package: .
+          startup-command: 'python -m uvicorn main:app --host 0.0.0.0 --port 8000'
