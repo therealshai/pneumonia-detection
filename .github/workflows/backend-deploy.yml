@@ -30,6 +30,7 @@ jobs:
 
       # Step 3: Deploys the application to the Azure App Service.
       # This action automatically zips the contents of your repository and deploys it.
+      # The startup-command parameter has been removed to let Oryx handle it automatically.
       - name: 'Deploy to Azure Web App'
         id: deploy-to-webapp
         uses: azure/webapps-deploy@v2
@@ -38,6 +39,3 @@ jobs:
           app-name: 'pneumonia-detection-api-shaista'
           # The package to be deployed (the entire repository).
           package: '.'
-          # The startup command to run on the Azure App Service.
-          # This has been corrected to use 'startup-command'
-          startup-command: './startup.sh'
