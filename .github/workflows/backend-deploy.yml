@@ -1,4 +1,4 @@
-name: Build and deploy Python app to Azure Web App
+name: Deploy Pneumonia Detection API
 
 on:
   push:
@@ -33,17 +33,12 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt
           
-      # Optional: Add step to run tests
-      - name: Run tests
-        run: |
-          cd backend
-          source venv/bin/activate
-          # python -m pytest
-
       - name: Zip artifact for deployment
         run: |
           cd backend
-          zip -r ../backend.zip . -x venv/\* __pycache__/\* .pytest_cache/\* .git/\*
+          # Ensure requirements.txt is included
+          ls -la requirements.txt
+          zip -r ../backend.zip . -x venv/\* __pycache__/\* .pytest_cache/\* .git/\* .gitignore
 
       - name: Upload artifact for deployment jobs
         uses: actions/upload-artifact@v4
@@ -68,7 +63,7 @@ jobs:
         run: unzip backend.zip
 
       - name: 'Deploy to Azure Web App'
-        uses: azure/webapps-deploy@v3
+        uses: azure/webapps-deploy@85270a1854c8865b1e5491994558394c31e9a15b
         id: deploy-to-webapp
         with:
           app-name: 'pneumonia-detection-api-shaista'
