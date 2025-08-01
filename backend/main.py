@@ -59,11 +59,12 @@ app = FastAPI(
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://jolly-coast-028cff500.1.azurestaticapps.net"],  # azure frontend URL
+    allow_origins=["*"],  # Or specify your frontend domain
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 @app.get("/")
 async def root():
     return {"message": "Pneumonia Detection API is running!"}
