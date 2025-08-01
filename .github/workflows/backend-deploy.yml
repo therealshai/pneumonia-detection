@@ -36,17 +36,19 @@ jobs:
       - name: Debug - List files before zipping
         run: |
           cd backend
-          echo "Files in backend directory:"
+          echo "=== Files in backend directory ==="
           ls -la
-          echo "Content of requirements.txt:"
-          head -5 requirements.txt
+          echo "=== Content of requirements.txt ==="
+          head -10 requirements.txt
+          echo "=== Content of main.py (first 20 lines) ==="
+          head -20 main.py
           
       - name: Zip artifact for deployment
         run: |
           cd backend
           zip -r ../backend.zip . -x venv/\* __pycache__/\* .pytest_cache/\* .git/\* .gitignore
-          echo "Zip file created, contents:"
-          unzip -l ../backend.zip | head -20
+          echo "=== Zip file created, checking contents ==="
+          unzip -l ../backend.zip | head -30
 
       - name: Upload artifact for deployment jobs
         uses: actions/upload-artifact@v4
@@ -68,10 +70,20 @@ jobs:
           name: python-app
 
       - name: Unzip artifact for deployment
-        run: unzip backend.zip
+        run: |
+          unzip backend.zip
+          echo "=== Files after unzipping ==="
+          ls -la
+          echo "=== Checking if requirements.txt exists ==="
+          if [ -f requirements.txt ]; then
+            echo "✅ requirements.txt found"
+            head -5 requirements.txt
+          else
+            echo "❌ requirements.txt NOT found"
+          fi
 
       - name: 'Deploy to Azure Web App'
-        uses: azure/webapps-deploy@85270a1854c8865b1e5491994558394c31e9a15b
+        uses: azure/webapps-deploy@v2
         id: deploy-to-webapp
         with:
           app-name: 'pneumonia-detection-api-shaista'
